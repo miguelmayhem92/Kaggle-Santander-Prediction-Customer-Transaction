@@ -10,16 +10,34 @@ import matplotlib.gridspec as gridspec
 import seaborn as sns; sns.set()
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import precision_score,accuracy_score,roc_auc_score
+from sklearn.linear_model import LogisticRegression
 
-def scaler(dataset):
-    df  = dataset.iloc[:,2:]
-    scaler = StandardScaler()
-    scaler.fit(df)
+def scaler(dataset, scaler=None):
+    if scaler:
+        df = dataset.iloc[:,1:]
+        df_scaled = scaler.transform(df)
+        dataset_scaled = pd.DataFrame(df_scaled, columns = df.columns)
+        df_result = pd.concat([dataset.iloc[:,0:1],dataset_scaled], axis = 1)
+        return df_result
+    
+    else:
+        df  = dataset.iloc[:,1:]
+        scaler = StandardScaler()
+        scaler.fit(df)
 
-    dataset_scaled = scaler.transform(df)
-    dataset_scaled = pd.DataFrame(dataset_scaled, columns = df.columns)
-    df_result = pd.concat([dataset.iloc[:,0:2],dataset_scaled], axis = 1)
-    return df_result, scaler
+        dataset_scaled = scaler.transform(df)
+        dataset_scaled = pd.DataFrame(dataset_scaled, columns = df.columns)
+        df_result = pd.concat([dataset.iloc[:,0:1],dataset_scaled], axis = 1)
+        return df_result, scaler
+    
+def partitions(data, limits = [1.269331,-0.253846]):
+
+    data_section_1 = data[data.mahalanobis > limits[0]]
+    data_section_2 = data[(data.mahalanobis > limits[1]) & (data.mahalanobis <= limits[0])]
+    data_section_3 = data[data.mahalanobis <= limits[1]]
+    
+    return data_section_1, data_section_2, data_section_3
 
 def threeD_plot(dataset,variables,fraq = 0.10):
     variables = variables + ["target"]
@@ -130,3 +148,271 @@ def concentrated_augmentation(data, columns, n, category, label_target = 3, rate
         new_data_result.append(new_data_df)
     new_data_result = pd.concat(new_data_result)
     return new_data_result
+
+
+def augmentation_strategy(data, dict_1,dict_2, dict_3,gen_mean, gen_cov, columns_features ):
+    aug_normal = normal_augmentation(data = data , columns = columns_features, n = dict_1['n'],
+                          pop_mean = gen_mean, pop_cov = gen_cov, range_distance = dict_1['range'], label_target = dict_1['label'], rate = dict_1['rate'])
+    
+    aug_conditioned_1 = concentrated_augmentation(data = data, columns = columns_features, n = dict_2['n'], category = dict_2['label'])
+    
+    aug_conditioned_2 = concentrated_augmentation(data = aug_normal, columns = columns_features, n = dict_3['n'], category = dict_3['category'], label_target = dict_3['label'])
+    
+    augmentation_result = pd.concat([data, aug_normal,  aug_conditioned_1, aug_conditioned_2])
+    
+    return augmentation_result 
+
+def augmentation_selection_rates(data, rate = 0.0, sample = 1.0):
+    data1 = data[data.target.isin([0,1])].copy()
+    data2 = data[~data.target.isin([0,1])].sample(frac = rate).copy()
+    data2['target'] = 1
+    
+    dataresult = pd.concat([data1,data2]).sample(frac = sample).copy()
+    return dataresult
+
+def metrics_train_validation(model, X_train, Y_train, X_val, Y_val):
+    predictions_train, predictions_probas = model.predict(X_train), model.predict_proba(X_train)[:,1]
+    
+    metrics = {'Train' : {'precision': precision_score(Y_train.values,predictions_train),
+          'Accuracy' : accuracy_score(Y_train.values,predictions_train),
+          'AUC' : roc_auc_score(Y_train.values,predictions_probas)}}
+
+    predictions_validation, predictions_probas = model.predict(X_val),  model.predict_proba(X_val)[:,1]
+
+    metrics['Validation'] = {'precision': precision_score(Y_val.values,predictions_validation),
+              'Accuracy' : accuracy_score(Y_val.values,predictions_validation),
+              'AUC' : roc_auc_score(Y_val.values,predictions_probas)}
+
+    to_conf_mat = pd.DataFrame({'True': Y_val, 'Pred' : predictions_validation})
+    conf_mat = to_conf_mat.assign(ones = 1).pivot_table(index = 'True', columns = 'Pred',values = 'ones', aggfunc = 'count')
+    
+    return metrics, conf_mat, predictions_validation
+
+def balance_validation(data, additional = 0):
+    ones = len(data[data.target == 1]) + additional
+    ones_list  = list(data[data.target == 1].index)
+    selected = list(data[data.target == 0].sample(n = ones, replace = False).copy().index)
+    
+    result_data = data[data.index.isin(ones_list + selected)]
+    
+    return result_data
+
+def k_folds_indexs(data, folds = 5, balanced = False, validation_additional_false = 500, validation_reduce_false = 700 ):
+
+    def split(a, n):
+        k, m = divmod(len(a), n)
+        return (a[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(n))
+    
+    index = data[data.target.isin([0,1])].index
+    array_index = np.array(index)
+    np.random.shuffle(array_index)
+    list_index = list(array_index)
+    result_split = list(split(list_index, folds))
+    
+    result_validation_indexs = result_split
+    
+    if balanced:
+        result_validation_indexs = list()
+        for fold in result_split:
+            temp_val = data[data.index.isin(fold)]
+            temp_val =  balance_validation(temp_val, validation_additional_false )
+            array = list(temp_val.index)
+            result_validation_indexs.append(array)
+    
+    result_train_indexs = list()
+    for fold in result_validation_indexs:
+        train_data_raw = data[~data.index.isin(fold)]
+        if validation_reduce_false:
+            indexs = np.array(train_data_raw[train_data_raw.target.isin([0])].index)
+            np.random.shuffle(indexs)
+            indexs_selected = list(indexs)[0:validation_reduce_false]
+        train_data_indexs = list(train_data_raw[~train_data_raw.index.isin(indexs_selected)].index)
+        result_train_indexs.append(train_data_indexs)
+            
+    data_indexs = dict()
+    for fold in range(1, folds+1):
+        data_indexs[f'fold {fold}'] = { 'train index': result_train_indexs[fold-1], 'val index': result_validation_indexs[fold-1], }
+    
+    return data_indexs
+
+
+def model_fitting_kfold(models, indexes_kfolds, features, train_data, rate_aug, sample_aug ):
+    indexm = 1
+    model_results = dict()
+    for model,rate_param, sample_param in zip(models,rate_aug, sample_aug) :
+        fold_result = dict()
+        fold_i = 1
+        for fold in indexes_kfolds.keys():
+            
+            train_index, val_index = indexes_kfolds[fold]['train index'] , indexes_kfolds[fold]['val index']
+
+            validation_data = train_data[train_data.index.isin(val_index)]
+            train_data_tomodel = train_data[train_data.index.isin(train_index)]
+        
+            train_data_tomodel_aug = augmentation_selection_rates(train_data_tomodel, rate = rate_param, sample = sample_param)
+
+            X_train = train_data_tomodel_aug[features]
+            Y_train = train_data_tomodel_aug['target']
+
+            X_val = validation_data[features]
+            Y_val = validation_data['target']
+            
+            #### MODEL TRAINING:
+            my_model = model.fit(X_train, Y_train)
+            result_metrics, _, _ = metrics_train_validation(my_model, X_train, Y_train, X_val, Y_val)
+            
+            fold_result[f'fold-{fold_i}'] = {'metrics': result_metrics}
+            #print(f'fold {fold_i} done')
+            fold_i = fold_i + 1
+        model_results[f'model-{indexm}'] = fold_result
+        print(f'done machine {indexm}')
+        indexm = indexm + 1
+    return model_results
+
+def jsontotable(json, typex = 'Validation'):
+    list_machines, list_folds, list_acc, list_auc = list(), list(), list(),list()
+    
+    for machine in json.keys():
+        machine_json = json[machine]
+        for fold in machine_json.keys():
+            mets = machine_json[fold]['metrics'][typex]
+            Acc, AUC = mets['Accuracy'], mets['AUC']
+            list_machines.append(machine), list_folds.append(fold), list_acc.append(Acc), list_auc.append(AUC)
+    data = {'machine': list_machines, 'fold' : list_folds , 'Accuracy' : list_acc, 'AUC': list_auc}
+    result_data = pd.DataFrame(data)
+    return result_data
+
+def plot_results(data):
+    fig, axs = plt.subplots(nrows=2, ncols=1,figsize=(15,10))
+
+    ax = sns.swarmplot(ax = axs[0] , data = data , x="machine", y="AUC", hue = 'fold')
+    ax = sns.swarmplot(ax = axs[1] , data = data , x="machine", y="Accuracy", hue = 'fold')
+
+    fig.show()
+    
+    
+def unscaler(dataset, scalerx):
+    df = dataset.iloc[:,1:]
+    df_unscaled = scalerx.inverse_transform(df)
+    dataset_unscaled = pd.DataFrame(df_unscaled , columns = df.columns,index = df.index)
+    df_result = pd.concat([dataset.iloc[:,0:1],dataset_unscaled], axis = 1)
+    return df_result
+
+
+def k_folds_indexs(data, folds = 5, balanced = False, validation_additional_false = 500, validation_reduce_false = 700 ):
+
+    def split(a, n):
+        k, m = divmod(len(a), n)
+        return (a[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(n))
+    
+    index = data[data.target.isin([0,1])].index
+    array_index = np.array(index)
+    np.random.shuffle(array_index)
+    list_index = list(array_index)
+    result_split = list(split(list_index, folds))
+    
+    result_validation_indexs = result_split
+    
+    if balanced:
+        result_validation_indexs = list()
+        for fold in result_split:
+            temp_val = data[data.index.isin(fold)]
+            temp_val =  balance_validation(temp_val, validation_additional_false )
+            array = list(temp_val.index)
+            result_validation_indexs.append(array)
+    
+    result_train_indexs = list()
+    for fold in result_validation_indexs:
+        train_data_raw = data[~data.index.isin(fold)]
+        if validation_reduce_false:
+            indexs = np.array(train_data_raw[train_data_raw.target.isin([0])].index)
+            np.random.shuffle(indexs)
+            indexs_selected = list(indexs)[0:validation_reduce_false]
+        train_data_indexs = list(train_data_raw[~train_data_raw.index.isin(indexs_selected)].index)
+        result_train_indexs.append(train_data_indexs)
+            
+    data_indexs = dict()
+    for fold in range(1, folds+1):
+        data_indexs[f'fold {fold}'] = { 'train index': result_train_indexs[fold-1], 'val index': result_validation_indexs[fold-1], }
+    
+    return data_indexs
+
+def model_fitting_kfold(models, indexes_kfolds, features, train_data, rate_aug, sample_aug, save_model = False, save_nro_machine = 1 ):
+    indexm = 1
+    model_results = dict()
+    model_saved = list()
+    for model,rate_param, sample_param in zip(models,rate_aug, sample_aug) :
+        fold_result = dict()
+        fold_i = 1
+        for fold in indexes_kfolds.keys():
+            
+            train_index, val_index = indexes_kfolds[fold]['train index'] , indexes_kfolds[fold]['val index']
+
+            validation_data = train_data[train_data.index.isin(val_index)]
+            train_data_tomodel = train_data[train_data.index.isin(train_index)]
+        
+            train_data_tomodel_aug = augmentation_selection_rates(train_data_tomodel, rate = rate_param, sample = sample_param)
+
+            X_train = train_data_tomodel_aug[features]
+            Y_train = train_data_tomodel_aug['target']
+
+            X_val = validation_data[features]
+            Y_val = validation_data['target']
+            
+            #### MODEL TRAINING:
+            my_model = model.fit(X_train, Y_train)
+            if save_model and indexm == save_nro_machine:
+                model_saved.append(my_model)
+                
+            result_metrics, _, _ = metrics_train_validation(my_model, X_train, Y_train, X_val, Y_val)
+            
+            fold_result[f'fold-{fold_i}'] = {'metrics': result_metrics}
+            #print(f'fold {fold_i} done')
+            fold_i = fold_i + 1
+            
+        model_results[f'model-{indexm}'] = fold_result
+        print(f'done machine {indexm}')
+        indexm = indexm + 1
+    return model_results, model_saved
+
+def weighting_models(models, features, data, trained_model = None):
+    X_train = data[data.target.isin([0,1])][features]
+    Y_train = data[data.target.isin([0,1])]['target']
+    probas_result = dict()
+    i = 1
+    for model in models:    
+        probas = model.predict_proba(X_train)[:,1]
+        probas_result[i] = probas
+    probas_result['target'] = Y_train
+    result_df = pd.DataFrame(probas_result)
+    X_train = result_df.iloc[:,0:-1]
+    Y_train = result_df['target']
+    
+    if trained_model:
+        probas = trained_model.predict_proba(X_train)[:,1]
+        return probas
+    else:
+        weight_model = LogisticRegression().fit(X_train, Y_train)
+        return weight_model
+
+def jsontotable(json, typex = 'Validation'):
+    list_machines, list_folds, list_acc, list_auc = list(), list(), list(),list()
+    
+    for machine in json.keys():
+        machine_json = json[machine]
+        for fold in machine_json.keys():
+            mets = machine_json[fold]['metrics'][typex]
+            Acc, AUC = mets['Accuracy'], mets['AUC']
+            list_machines.append(machine), list_folds.append(fold), list_acc.append(Acc), list_auc.append(AUC)
+    data = {'machine': list_machines, 'fold' : list_folds , 'Accuracy' : list_acc, 'AUC': list_auc}
+    result_data = pd.DataFrame(data)
+    return result_data
+
+def plot_results(data):
+    fig, axs = plt.subplots(nrows=2, ncols=1,figsize=(15,10))
+
+    ax = sns.swarmplot(ax = axs[0] , data = data , x="machine", y="AUC", hue = 'fold')
+    ax = sns.swarmplot(ax = axs[1] , data = data , x="machine", y="Accuracy", hue = 'fold')
+
+    fig.show()
+    
