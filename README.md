@@ -21,4 +21,4 @@ Notebooks:
 * [Exploration](https://github.com/miguelmayhem92/Kaggle-Santander-Prediction-Customer-Transaction/blob/main/CST_explo.ipynb)
 * [Modeling](https://github.com/miguelmayhem92/Kaggle-Santander-Prediction-Customer-Transaction/blob/main/CST_modeling.ipynb)
 * [Tunning](https://github.com/miguelmayhem92/Kaggle_Santander/blob/main/CST_Tunning.ipynb)
-* [Tunning Random Forest] (https://github.com/miguelmayhem92/Kaggle_Santander/blob/main/CST_RF_Tunning.ipynb)
+* [Tunning Random Forest](https://github.com/miguelmayhem92/Kaggle_Santander/blob/main/CST_RF_Tunning.ipynb)
