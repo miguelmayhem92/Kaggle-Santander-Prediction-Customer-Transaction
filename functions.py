@@ -416,3 +416,9 @@ def plot_results(data):
 
     fig.show()
     
+def reconstructing_data(list_data, list_predictions, threshold = 0.15 ):
+    list_data_result = list()
+    for data,vector in zip(list_data, list_predictions):
+        data['target'] = np.where(vector > threshold, 1,0)
+        list_data_result.append(data)
+    return pd.concat(list_data_result).sort_index()
