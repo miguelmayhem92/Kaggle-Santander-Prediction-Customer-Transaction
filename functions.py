@@ -12,7 +12,12 @@ import seaborn as sns; sns.set()
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import precision_score,accuracy_score,roc_auc_score
 from sklearn.linear_model import LogisticRegression
+from sklearn.calibration import calibration_curve, CalibratedClassifierCV
 
+from sklearn.calibration import CalibrationDisplay
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+    
 def scaler(dataset, scaler=None):
     if scaler:
         df = dataset.iloc[:,1:]
@@ -154,7 +159,7 @@ def augmentation_strategy(data, dict_1,dict_2, dict_3,gen_mean, gen_cov, columns
     aug_normal = normal_augmentation(data = data , columns = columns_features, n = dict_1['n'],
                           pop_mean = gen_mean, pop_cov = gen_cov, range_distance = dict_1['range'], label_target = dict_1['label'], rate = dict_1['rate'])
     
-    aug_conditioned_1 = concentrated_augmentation(data = data, columns = columns_features, n = dict_2['n'], category = dict_2['label'])
+    aug_conditioned_1 = concentrated_augmentation(data = data, columns = columns_features, n = dict_2['n'], category = dict_2['category'], label_target = dict_2['label'])
     
     aug_conditioned_2 = concentrated_augmentation(data = aug_normal, columns = columns_features, n = dict_3['n'], category = dict_3['category'], label_target = dict_3['label'])
     
@@ -187,6 +192,24 @@ def metrics_train_validation(model, X_train, Y_train, X_val, Y_val):
     conf_mat = to_conf_mat.assign(ones = 1).pivot_table(index = 'True', columns = 'Pred',values = 'ones', aggfunc = 'count')
     
     return metrics, conf_mat, predictions_validation
+
+def my_calibration_plot(model, calibrated_model, X_data, Y_data):
+    
+    fig = plt.figure(figsize=(10, 10))
+    gs = GridSpec(1,1)
+    ax_calibration_curve = fig.add_subplot(gs[0])
+    calibration_displays = {}
+    display = CalibrationDisplay.from_estimator(model,X_data,Y_data,n_bins=10,name ='No calibrated', ax = ax_calibration_curve, color = 'red')
+    calibration_displays['No calibrated'] = display
+    
+    
+    ax = fig.add_subplot(gs[0])
+    probs_calib = calibrated_model.predict_proba(X_data)[:, 1]
+    fop_calib, mpv_calib = calibration_curve(Y_data, probs_calib, n_bins=10, normalize=True)
+    
+    ax.plot(mpv_calib, fop_calib, marker='.', color = 'blue', label = 'Calibrated')
+    plt.legend()
+    plt.show()
 
 def balance_validation(data, additional = 0):
     ones = len(data[data.target == 1]) + additional
