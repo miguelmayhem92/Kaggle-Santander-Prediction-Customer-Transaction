@@ -167,12 +167,19 @@ def augmentation_strategy(data, dict_1,dict_2, dict_3,gen_mean, gen_cov, columns
     
     return augmentation_result 
 
-def augmentation_selection_rates(data, rate = 0.0, sample = 1.0):
-    data1 = data[data.target.isin([0,1])].copy()
-    data2 = data[~data.target.isin([0,1])].sample(frac = rate).copy()
+def augmentation_selection_rates(data, rate = 0.0, sample = 1.0, reduction_falses = 0):
+    data1 = data[data.target.isin([0,1])].copy() 
+    data2 = data[~data.target.isin([0,1])].sample(frac = rate).copy() ### For the augmentation
     data2['target'] = 1
     
-    dataresult = pd.concat([data1,data2]).sample(frac = sample).copy()
+    data_concat = pd.concat([data1,data2]).sample(frac = sample).copy()
+    
+    array_index = np.array(data_concat[data_concat.target.isin([0])].index)
+    np.random.shuffle(array_index)
+    array_index = list(array_index)
+    array_todrop = array_index[0:reduction_falses]
+    dataresult = data_concat[~data_concat.index.isin(array_todrop)]
+    
     return dataresult
 
 def metrics_train_validation(model, X_train, Y_train, X_val, Y_val):
