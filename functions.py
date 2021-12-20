@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import random
 import scipy as sp
+from operator import attrgetter
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -153,6 +154,32 @@ def concentrated_augmentation(data, columns, n, category, label_target = 3, rate
         new_data_result.append(new_data_df)
     new_data_result = pd.concat(new_data_result)
     return new_data_result
+
+def get_dictionary_count_lables(data,variables,bins):
+    labels_dictionary = dict()
+
+    for column in variables:
+        high_limits = list(pd.cut(data[column], bins= bins).map(attrgetter('right')).astype(float).sort_values().unique())
+        low_limits = list(pd.cut(data[column], bins= bins).map(attrgetter('left')).astype(float).sort_values().unique())
+        labels_list = list()
+        ## Geting the labels
+        for low,high in zip(low_limits, high_limits):
+            countx = len(data[(data[column] >= low) & (data[column] <= high) & (data.target == 1)] )
+            labels_list.append(countx)
+
+        labels_dictionary[column] = {'low': low_limits, 'high': high_limits, 'label': labels_list}
+    return labels_dictionary
+
+def count_encoding(data, dictionary_lables, variables):
+    data_result = data.copy()
+    for variable in variables:
+        lowers = dictionary_lables[variable]['low']
+        highers = dictionary_lables[variable]['high']
+        labels = dictionary_lables[variable]['label']
+        data_result[f'count{variable}'] = 0
+        for low,high,label in zip(lowers,highers,labels):
+            data_result[f'count{variable}'] = np.where((data_result[variable] >= low) & (data_result[variable] <= high), label, data_result[f'count{variable}'] )
+    return data_result
 
 
 def augmentation_strategy(data, dict_1,dict_2, dict_3,gen_mean, gen_cov, columns_features ):
