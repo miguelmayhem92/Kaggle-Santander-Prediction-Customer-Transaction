@@ -10,9 +10,10 @@ Some particularities of the data:
 
 ### My strategy to tackle the challenge:
 * Exploration
-* split the data based on mahalnobis distance
+* basic feature selection
+* feature generation using mahalanobis distance and counting encoding 
 * Data augmentation and data reduction strategy
-* Models explorations: KNN, SVM and RF
+* Models explorations: KNN, RF and GBM
 * Model Selection (using Kfold cross validation and some tunning)
 * Furhter tunning
 * Prediction
